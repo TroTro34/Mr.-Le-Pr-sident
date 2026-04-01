@@ -1,0 +1,6 @@
+Le code source de ce projet est placé sous licence GNU GPL v3+.
+La documentation et les textes sont placés sous licence Creative Commons CC By-Sa.
+
+Pour plus d'informations :
+- GPL v3 : https://www.gnu.org/licenses/gpl-3.0.fr.html
+- CC By-Sa : https://creativecommons.org/licenses/by-sa/4.0/deed.fr
