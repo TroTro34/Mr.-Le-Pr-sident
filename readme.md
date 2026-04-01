@@ -85,16 +85,6 @@ mr-le-president/
 
 ---
 
-## 👥 Team
-
-| Name | Role |
-|------|------|
-| **Maxence** (TroTro) | Game systems, gauges, text display |
-| **Laura** | Special dialogue system, character design |
-| **Apolline** | Characters, backgrounds, visual effects |
-
----
-
 ## 📜 License
 
 - **Source code** → [GNU GPL v3](https://www.gnu.org/licenses/gpl-3.0.fr.html)
