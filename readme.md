@@ -1,5 +1,5 @@
 <div align="center">
-  <img src="./data/banner.png" alt="Mr. Le Président" width="100%" />
+  <img src="https://raw.githubusercontent.com/TroTro34/Mr.LePresident/main/data/image.png" alt="Mr. Le Président" width="100%" />
 
   # 🎖️ Mr. Le Président
 
