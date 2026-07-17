@@ -19,6 +19,9 @@ eco = 100
 envi = 100
 ImpacteJauge = 20
 
+eco_affiche = eco              # valeur affichée à l'écran, qui "roule" progressivement vers eco
+RATIO_ARGENT = 1_000_000_000   # 1 point de jauge = 1 milliard d'euros affichés
+
 info = pygame.display.Info()
 largeur = info.current_w
 hauteur = info.current_h
@@ -197,6 +200,32 @@ def boxe():
     ecran.blit(surface, (0, 780))
 
 
+# --- Affiche le montant d'argent en haut à droite, avec un effet de roulement ---
+def afficher_argent():
+    global eco_affiche
+
+    # Rapproche progressivement la valeur affichée de la vraie valeur (eco)
+    diff = eco - eco_affiche
+    if abs(diff) < 0.05:
+        eco_affiche = eco
+    else:
+        eco_affiche += diff * 0.08   # 8% de l'écart restant à chaque frame -> effet "ease-out"
+
+    montant = int(eco_affiche * RATIO_ARGENT)
+    texte = f"{montant:,}".replace(",", " ") + " €"
+
+    font_argent = pygame.font.Font(chemin("Capture it.ttf"), 28)
+    surf = font_argent.render(texte, True, (255, 215, 0))
+    rect = surf.get_rect(topright=(largeur - 30, 20))
+
+    fond = pygame.Surface((rect.width + 20, rect.height + 12), pygame.SRCALPHA)
+    fond.fill((0, 0, 0, 140))
+    fond_rect = fond.get_rect(topright=(largeur - 20, 10))
+    ecran.blit(fond, fond_rect)
+
+    ecran.blit(surf, rect)
+
+
 # --- Fondu noir progressif avant l'écran de mort ---
 def afficher_fadeout():
     global fadeOutCounter, fadeOutDone
@@ -282,9 +311,10 @@ def restart():
     global fadeOutDone, Start, Pres, Question, QuestionNumbers, counter
     global Done, startIndex, AvantGame, generationCount, NombreTextSpe
     global TextSpeIndex, SuiteTextSpe, QuestionSpe, Partie1Active, IndexFin
-    global ancient, randomP, WitchDialogue
+    global ancient, randomP, WitchDialogue, eco_affiche
 
     Arme = 100; Population = 100; eco = 100; envi = 100
+    eco_affiche = 100
     GameOver = False; FinJeu = False
     gameOverText = ""; gameOverCounter = 0; gameOverDone = False
     fadeOutCounter = 0; fadeOutDone = False
@@ -697,6 +727,7 @@ def rendu_jeu():
         ecran.blit(background, (0, 0))
 
     boxe()
+    afficher_argent()
 
     if counter == 0:
         img_perso = personnages()
