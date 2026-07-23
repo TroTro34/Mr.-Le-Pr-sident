@@ -12,6 +12,9 @@ def chemin(fichier):
     return os.path.join(BASE, "data", fichier)
 
 pygame.init()
+pygame.mixer.init()
+pygame.mixer.music.load(chemin("test_trimmed.wav"))
+
 
 Arme = 100
 Population = 100
@@ -21,6 +24,8 @@ ImpacteJauge = 20
 
 eco_affiche = eco              # valeur affichée à l'écran, qui "roule" progressivement vers eco
 RATIO_ARGENT = 1_000_000_000   # 1 point de jauge = 1 milliard d'euros affichés
+argent_variation = random.randint(-250_000_000, 250_000_000)
+ancien_eco = eco
 
 info = pygame.display.Info()
 largeur = info.current_w
@@ -38,7 +43,7 @@ ChoixHistoire = {
     "Question2": False,
     "Question3": False,
     "Question4": False,
-    "Question5": False,
+    "Question5": False
 }
 
 timerType = pygame.time.Clock()
@@ -103,6 +108,14 @@ fadeOutDone = False
 
 gameOverEndTime = None
 
+# --- Animation de glissement (texte / boîte / boutons oui-non) ---
+text_hidden = False
+text_slide_offset = 0.0
+arrow_slide_offset = 0.0
+TEXT_SLIDE_EASING = 0.15   # 15% de l'écart restant chaque frame -> glissement smooth (ease-out)
+
+ArrowImage = pygame.image.load(chemin("ArrowDown.png")).convert_alpha()
+MedImage = pygame.image.load(chemin("MedBox.png")).convert_alpha()
 yesImage = pygame.image.load(chemin("vraiYES.png")).convert_alpha()
 noImage = pygame.image.load(chemin("vraiNON.png")).convert_alpha()
 
@@ -194,15 +207,15 @@ def wrap_text(texte, font, max_width):
 
 
 # --- Affiche la boîte de dialogue semi-transparente en bas ---
-def boxe():
+def boxe(offset_y=0):
     surface = pygame.Surface((largeur, 300), pygame.SRCALPHA)
     surface.fill((0, 0, 0, 160))
-    ecran.blit(surface, (0, 780))
+    ecran.blit(surface, (0, 780 + offset_y))
 
 
 # --- Affiche le montant d'argent en haut à droite, avec un effet de roulement ---
 def afficher_argent():
-    global eco_affiche
+    global eco_affiche, ancien_eco, argent_variation
 
     # Rapproche progressivement la valeur affichée de la vraie valeur (eco)
     diff = eco - eco_affiche
@@ -211,7 +224,11 @@ def afficher_argent():
     else:
         eco_affiche += diff * 0.08   # 8% de l'écart restant à chaque frame -> effet "ease-out"
 
-    montant = int(eco_affiche * RATIO_ARGENT)
+    if eco != ancien_eco:
+        ancien_eco = eco
+        argent_variation = random.randint(-250_000_000, 250_000_000)
+
+    montant = int(eco_affiche * RATIO_ARGENT + argent_variation)
     texte = f"{montant:,}".replace(",", " ") + " €"
 
     font_argent = pygame.font.Font(chemin("Capture it.ttf"), 28)
@@ -396,8 +413,14 @@ def choixSpe(clic_oui, clic_non):
             text()
 
 
+# --- Fait glisser vers le bas (ou remonter) le texte, la boîte et les boutons oui/non ---
+def remove_Text():
+    global text_hidden
+    text_hidden = not text_hidden
+
+
 # --- Gestion des choix normaux (jauges) ---
-def choixjoueur(clic_oui, clic_non):
+def choixjoueur(clic_oui, clic_non, clic_med, clic_Arrow):
     global Arme, Population, eco, envi
     global Question, ancient, SuiteTextSpe, QuestionNumbers, ImpacteJauge
     global generationCount
@@ -467,6 +490,12 @@ def choixjoueur(clic_oui, clic_non):
         Question = False
         SuiteTextSpe = True
         textspecial()
+
+    if clic_med:
+        print("Med has been clicked correctly")
+
+    if clic_Arrow:
+        remove_Text()
 
 
 # --- Vérifie si une jauge est à 0 et déclenche le game over ---
@@ -719,6 +748,47 @@ def gerer_evenements():
                 text()
 
 
+# --- Gère et affiche tout ce qui glisse : boîte, texte, boutons oui/non et flèche ---
+def afficher_zone_texte():
+    global text_slide_offset, arrow_slide_offset
+
+    # Glissement smooth (ease-out) : rapproche progressivement l'offset de sa cible.
+    # La cible est calculée pour que les boutons oui/non (plus haut placés que la boîte)
+    # sortent eux aussi complètement de l'écran, pas seulement la boîte de texte.
+    haut_a_masquer = min(780, yesButton.rect.top, noButton.rect.top)
+    cible_offset = (hauteur - haut_a_masquer + 40) if text_hidden else 0
+    diff_offset = cible_offset - text_slide_offset
+    if abs(diff_offset) < 0.5:
+        text_slide_offset = cible_offset
+    else:
+        text_slide_offset += diff_offset * TEXT_SLIDE_EASING
+
+    # La flèche glisse elle aussi vers le bas de l'écran (sans en sortir, pour rester cliquable)
+    # et se retourne pour indiquer qu'un clic va faire remonter le texte.
+    cible_offset_fleche = (hauteur - 70 - ArrowYOrigine) if text_hidden else 0
+    diff_fleche = cible_offset_fleche - arrow_slide_offset
+    if abs(diff_fleche) < 0.5:
+        arrow_slide_offset = cible_offset_fleche
+    else:
+        arrow_slide_offset += diff_fleche * TEXT_SLIDE_EASING
+    ArrowButton.image = ArrowImageHaut if text_hidden else ArrowImageBas
+
+    # Boîte + texte (toujours affichés, quel que soit l'état)
+    boxe(text_slide_offset)
+    font = pygame.font.Font(chemin("Capture it.ttf"), size())
+    snip = font.render(WitchDialogue[0:counter // speed], True, (255, 255, 255))
+    ecran.blit(snip, (30, 820 + text_slide_offset))
+
+    # Boutons oui/non + flèche, uniquement pendant une question normale
+    clic_Arrow = clic_oui = clic_non = False
+    if Start and Done and Question:
+        clic_oui = yesButton.draw(offset=(0, text_slide_offset))
+        clic_non = noButton.draw(offset=(0, text_slide_offset))
+        clic_Arrow = ArrowButton.draw(offset=(0, arrow_slide_offset))
+
+    return clic_Arrow, clic_oui, clic_non
+
+
 # --- Rendu du jeu (personnage, texte, boutons) ---
 def rendu_jeu():
     global counter, Done, img_perso
@@ -726,7 +796,6 @@ def rendu_jeu():
     if WitchDialogue not in (StartDialogue[0], StartDialogue[1]):
         ecran.blit(background, (0, 0))
 
-    boxe()
     afficher_argent()
 
     if counter == 0:
@@ -741,22 +810,24 @@ def rendu_jeu():
     else:
         Done = True
 
-    font = pygame.font.Font(chemin("Capture it.ttf"), size())
-    snip = font.render(WitchDialogue[0:counter // speed], True, (255, 255, 255))
-    ecran.blit(snip, (30, 820))
-
+    # MedButton dessiné AVANT afficher_zone_texte() pour que la boîte glissante passe par-dessus lui
     if Start and Done and Question:
-        clic_oui = yesButton.draw()
-        clic_non = noButton.draw()
-        if not SuiteTextSpe:
-            choixjoueur(clic_oui, clic_non)
+        clic_med = MedButton.draw()
+    else:
+        clic_med = False
+
+    clic_Arrow, clic_oui, clic_non = afficher_zone_texte()
+
+    if Start and Done and Question and not SuiteTextSpe:
+        choixjoueur(clic_oui, clic_non, clic_med, clic_Arrow)
 
     if Done and QuestionSpe:
-        clic_oui = yesButton.draw()
-        clic_non = noButton.draw()
+        clic_oui = yesButton.draw(offset=(0, text_slide_offset))
+        clic_non = noButton.draw(offset=(0, text_slide_offset))
         choixSpe(clic_oui, clic_non)
 
     VerifierFinDePartie()
+
 
 
 class Button:
@@ -766,11 +837,12 @@ class Button:
         self.rect.topleft = (x, y)
         self.clicked = False
 
-    def draw(self):
+    def draw(self, offset=(0, 0)):
         action = False
         pos = pygame.mouse.get_pos()
+        draw_rect = self.rect.move(offset)
 
-        if self.rect.collidepoint(pos):
+        if draw_rect.collidepoint(pos):
             self.image.set_alpha(200)
             if pygame.mouse.get_pressed()[0] and not self.clicked:
                 self.clicked = True
@@ -781,13 +853,22 @@ class Button:
         if not pygame.mouse.get_pressed()[0]:
             self.clicked = False
 
-        ecran.blit(self.image, self.rect)
+        ecran.blit(self.image, draw_rect)
         return action
 
-
+ArrowButton = Button(largeur * 0.95, 800, 70, 50, ArrowImage)
+MedButton = Button(largeur * 0.16, 830, 200, 200, MedImage)
 yesButton = Button(largeur * 0.05, 620, 180, 180, yesImage)
 noButton = Button(largeur * 0.85, 620, 180, 180, noImage)
 img_perso = None
+
+# --- Image de la flèche retournée (pointe vers le haut) pour indiquer "réafficher le texte" ---
+ArrowImageBas = ArrowButton.image                     # flèche vers le bas (état normal)
+ArrowImageHaut = pygame.transform.rotate(ArrowImageBas, 180)  # flèche vers le haut (état texte masqué)
+ArrowYOrigine = ArrowButton.rect.top                   # position de départ de la flèche, utilisée pour calculer la descente
+
+
+pygame.mixer.music.play(-1)
 
 # --- Boucle principale ---
 while not close:
