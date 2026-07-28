@@ -5,6 +5,8 @@ import pygame
 import random
 import os
 
+from book import Livre
+
 
 BASE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
@@ -14,8 +16,9 @@ def chemin(fichier):
 pygame.init()
 pygame.mixer.init()
 pygame.mixer.music.load(chemin("test_trimmed.wav"))
-
-
+typing_sound = pygame.mixer.Sound(chemin("typing1.wav"))
+dernier_son_typing = 0
+DELAI_MIN_SON_TYPING = 60  # millisecondes minimum entre deux "tick" (empêche la saturation)
 Arme = 100
 Population = 100
 eco = 100
@@ -114,6 +117,7 @@ text_slide_offset = 0.0
 arrow_slide_offset = 0.0
 TEXT_SLIDE_EASING = 0.15   # 15% de l'écart restant chaque frame -> glissement smooth (ease-out)
 
+BookImage = pygame.image.load(chemin("book.png")).convert_alpha()
 ArrowImage = pygame.image.load(chemin("ArrowDown.png")).convert_alpha()
 MedImage = pygame.image.load(chemin("MedBox.png")).convert_alpha()
 yesImage = pygame.image.load(chemin("vraiYES.png")).convert_alpha()
@@ -420,7 +424,7 @@ def remove_Text():
 
 
 # --- Gestion des choix normaux (jauges) ---
-def choixjoueur(clic_oui, clic_non, clic_med, clic_Arrow):
+def choixjoueur(clic_oui, clic_non, clic_med, clic_Arrow, clic_book):
     global Arme, Population, eco, envi
     global Question, ancient, SuiteTextSpe, QuestionNumbers, ImpacteJauge
     global generationCount
@@ -496,7 +500,12 @@ def choixjoueur(clic_oui, clic_non, clic_med, clic_Arrow):
 
     if clic_Arrow:
         remove_Text()
+    if clic_book:
+        book_annimation()
 
+
+def book_annimation():
+    livre.clic_livre(ecran.copy())
 
 # --- Vérifie si une jauge est à 0 et déclenche le game over ---
 def VerifierFinDePartie():
@@ -721,6 +730,14 @@ def gerer_evenements():
 
         if event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
 
+            if livre.transition_en_cours():
+                continue
+
+            if livre.menu_actif():
+                if not livre.rect_menu.collidepoint(event.pos):
+                    livre.clic_fermer()
+                continue
+
             if GameOver or FinJeu:
 
                 continue
@@ -791,9 +808,11 @@ def afficher_zone_texte():
 
 # --- Rendu du jeu (personnage, texte, boutons) ---
 def rendu_jeu():
-    global counter, Done, img_perso
+    global counter, Done, img_perso, dernier_son_typing
 
-    if WitchDialogue not in (StartDialogue[0], StartDialogue[1]):
+    background_actif = WitchDialogue not in (StartDialogue[0], StartDialogue[1])
+
+    if background_actif:
         ecran.blit(background, (0, 0))
 
     afficher_argent()
@@ -806,25 +825,44 @@ def rendu_jeu():
         ecran.blit(img_perso, (x_perso, y_perso))
 
     if counter < speed * len(WitchDialogue):
+        ancien_index_lettre = counter // speed
         counter += 1
+        nouvel_index_lettre = counter // speed
+        if nouvel_index_lettre != ancien_index_lettre:
+            lettre = WitchDialogue[ancien_index_lettre] if ancien_index_lettre < len(WitchDialogue) else ""
+            maintenant = pygame.time.get_ticks()
+            if lettre != " " and maintenant - dernier_son_typing >= DELAI_MIN_SON_TYPING:
+                dernier_son_typing = maintenant
+                typing_sound.set_volume(random.uniform(0.25, 0.4))
+                typing_sound.play()
     else:
         Done = True
 
     # MedButton dessiné AVANT afficher_zone_texte() pour que la boîte glissante passe par-dessus lui
-    if Start and Done and Question:
-        clic_med = MedButton.draw()
+    livre_bloque_le_jeu = livre.transition_en_cours() or livre.menu_actif()
+
+    # Affichés dès que le vrai fond de jeu (background) est actif — pas pendant
+    # les dialogues d'intro sur écran noir. Ils ne deviennent survolables/cliquables
+    # que quand le texte est masqué (text_hidden) et que le livre ne bloque pas le jeu.
+    if background_actif:
+        boutons_interactifs = text_hidden and not livre_bloque_le_jeu
+        clic_med = MedButton.draw(interactive=boutons_interactifs)
+        clic_book = BookBouton.draw(interactive=boutons_interactifs)
     else:
         clic_med = False
+        clic_book = False
 
     clic_Arrow, clic_oui, clic_non = afficher_zone_texte()
 
-    if Start and Done and Question and not SuiteTextSpe:
-        choixjoueur(clic_oui, clic_non, clic_med, clic_Arrow)
+    if Start and Done and Question and not SuiteTextSpe and not livre_bloque_le_jeu:
+        choixjoueur(clic_oui, clic_non, clic_med, clic_Arrow,clic_book)
 
-    if Done and QuestionSpe:
+    if Done and QuestionSpe and not livre_bloque_le_jeu:
         clic_oui = yesButton.draw(offset=(0, text_slide_offset))
         clic_non = noButton.draw(offset=(0, text_slide_offset))
         choixSpe(clic_oui, clic_non)
+
+    livre.dessiner(ecran)
 
     VerifierFinDePartie()
 
@@ -837,30 +875,40 @@ class Button:
         self.rect.topleft = (x, y)
         self.clicked = False
 
-    def draw(self, offset=(0, 0)):
+    def draw(self, offset=(0, 0), interactive=True):
+        """interactive=False : le bouton est affiché mais ignore la souris
+        (pas de survol, pas de clic) — utile pour un bouton qui doit rester
+        visible sans être cliquable/survolable."""
         action = False
-        pos = pygame.mouse.get_pos()
         draw_rect = self.rect.move(offset)
 
-        if draw_rect.collidepoint(pos):
-            self.image.set_alpha(200)
-            if pygame.mouse.get_pressed()[0] and not self.clicked:
-                self.clicked = True
-                action = True
+        if interactive:
+            pos = pygame.mouse.get_pos()
+            if draw_rect.collidepoint(pos):
+                self.image.set_alpha(200)
+                if pygame.mouse.get_pressed()[0] and not self.clicked:
+                    self.clicked = True
+                    action = True
+            else:
+                self.image.set_alpha(255)
+
+            if not pygame.mouse.get_pressed()[0]:
+                self.clicked = False
         else:
             self.image.set_alpha(255)
-
-        if not pygame.mouse.get_pressed()[0]:
             self.clicked = False
 
         ecran.blit(self.image, draw_rect)
         return action
 
+BookBouton = Button(largeur * 0.36, 820, 500, 500, BookImage)
 ArrowButton = Button(largeur * 0.95, 800, 70, 50, ArrowImage)
 MedButton = Button(largeur * 0.16, 830, 200, 200, MedImage)
 yesButton = Button(largeur * 0.05, 620, 180, 180, yesImage)
 noButton = Button(largeur * 0.85, 620, 180, 180, noImage)
 img_perso = None
+
+livre = Livre(chemin, largeur, hauteur, BookBouton.rect)
 
 # --- Image de la flèche retournée (pointe vers le haut) pour indiquer "réafficher le texte" ---
 ArrowImageBas = ArrowButton.image                     # flèche vers le bas (état normal)
